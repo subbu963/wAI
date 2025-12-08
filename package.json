@@ -22,6 +22,7 @@
     "@electric-sql/pglite": "^0.3.14",
     "@electric-sql/pglite-tools": "^0.2.19",
     "@huggingface/transformers": "^3.8.1",
+    "daisyui": "^5.5.8",
     "drizzle-orm": "^0.45.0",
     "pubsub-js": "^1.9.5",
     "react": "^19.1.0",

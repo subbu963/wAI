@@ -12,3 +12,11 @@ function init() {
 }
 
 init();
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === "updateSidePanel") {
+    console.log("Received data:", message.data);
+    // Process the data in the side panel
+  }
+});
+console.log("Panel initialized");

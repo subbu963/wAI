@@ -1,8 +1,14 @@
 import React from 'react';
 import logo from '@assets/img/logo.svg';
 import '@pages/newtab/Newtab.css';
+import { db, notesTable } from '../background/db';
 
 export default function Newtab() {
+  React.useEffect( () => {
+    (async () => {
+      console.log(await db.select().from(notesTable));
+    })();
+  }, []);
   return (
     <div className="App">
       <header className="App-header">

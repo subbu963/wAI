@@ -16,6 +16,12 @@ chrome.contextMenus.removeAll(() => {
     title: "Note down", // Text shown in the menu
     contexts: ["selection", "link", "page"] // Where it appears (text, link, page)
   });
+  chrome.contextMenus.create({
+    parentId: MAIN_MENU_ID,
+    id: "wai_main_menu_openSidePanel",
+    title: "Open Side Panel",
+    contexts: ["all"] // Or specify contexts like "page", "selection", "link" etc.
+  });
 });
 
 // Listen for clicks on the menu item
@@ -36,4 +42,22 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     // });
     // PubSub.publish('NOTE_DOWN', info.selectionText || '');
   }
+  if (info.menuItemId === "wai_main_menu_openSidePanel") {
+      // Open a global side panel on the current window
+      // chrome.sidePanel.open({ windowId: tab.windowId });
+
+      // Alternatively, to open a tab-specific side panel:
+      chrome.storage.local.set({ sidePanelData: {
+        tabId: tab?.id,
+        type: "note_down",
+        data: {
+          content: info.selectionText || '',
+          url: tab?.url || '',
+          favIconUrl: tab?.favIconUrl || '',
+        }
+      }}, () => {
+        chrome.sidePanel.open({ tabId: tab?.id })
+      });
+      // chrome.sidePanel.open({ tabId: tab?.id });
+    }
 });

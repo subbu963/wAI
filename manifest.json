@@ -20,8 +20,13 @@
   "permissions": [
     "activeTab",
     "contextMenus",
-    "scripting"
+    "scripting",
+    "sidePanel",
+    "storage"
   ],
+  "side_panel": {
+    "default_path": "src/pages/panel/index.html"
+  },
   "content_scripts": [
     {
       "matches": [
