@@ -13,14 +13,20 @@
     "build:firefox": "vite build --config vite.config.firefox.ts",
     "dev": "nodemon --config nodemon.chrome.json",
     "dev:chrome": "nodemon --config nodemon.chrome.json",
-    "dev:firefox": "nodemon --config nodemon.firefox.json"
+    "dev:firefox": "nodemon --config nodemon.firefox.json",
+    "db:generate": "drizzle-kit generate",
+    "db:studio": "drizzle-kit studio"
   },
   "type": "module",
   "dependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "@electric-sql/pglite-tools": "^0.2.19",
     "@huggingface/transformers": "^3.8.1",
+    "drizzle-orm": "^0.45.0",
     "pubsub-js": "^1.9.5",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "try": "^1.0.1",
     "voy-search": "^0.6.3",
     "webextension-polyfill": "^0.12.0"
   },
@@ -28,6 +34,7 @@
     "@crxjs/vite-plugin": "^2.0.3",
     "@tailwindcss/vite": "^4.1.11",
     "@types/chrome": "^0.1.11",
+    "@types/dom-chromium-ai": "^0.0.11",
     "@types/node": "^24.9.1",
     "@types/pubsub-js": "^1.8.6",
     "@types/react": "^19.1.8",
@@ -36,6 +43,7 @@
     "@typescript-eslint/eslint-plugin": "^7.8.0",
     "@typescript-eslint/parser": "^7.18.0",
     "@vitejs/plugin-react": "^4.7.0",
+    "drizzle-kit": "^0.31.8",
     "eslint": "^9.32.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import": "^2.32.0",

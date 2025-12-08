@@ -29,7 +29,16 @@ export const baseManifest = {
 
 export const baseBuildOptions: BuildOptions = {
   sourcemap: isDev,
-  emptyOutDir: !isDev
+  emptyOutDir: !isDev,
+  rollupOptions: {
+    onwarn(warning, warn) {
+      // Suppress warnings about Node.js modules being externalized for browser
+      if (warning.code === 'MODULE_LEVEL_DIRECTIVE') return;
+      if (warning.message?.includes('has been externalized for browser compatibility')) return;
+      if (warning.message?.includes('is not exported by "__vite-browser-external"')) return;
+      warn(warning);
+    },
+  },
 }
 
 export default defineConfig({
@@ -44,4 +53,7 @@ export default defineConfig({
     wasm(),
   ],
   publicDir: resolve(__dirname, 'public'),
+  optimizeDeps: {
+    exclude: ['@electric-sql/pglite'],
+  },
 });
