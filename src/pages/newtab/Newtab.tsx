@@ -1,6 +1,7 @@
 import React from 'react';
 import '@pages/newtab/Newtab.css';
 import { getDb, notesTable, contentsTable, remindersTable } from '../background/db';
+import { eq } from 'drizzle-orm';
 
 interface ContentItem {
   id: number;
@@ -33,6 +34,11 @@ export default function Newtab() {
   const [loading, setLoading] = React.useState(true);
   const [dbError, setDbError] = React.useState<Error | null>(null);
   const [clearing, setClearing] = React.useState(false);
+  const [selectedNote, setSelectedNote] = React.useState<Note | null>(null);
+  const [editName, setEditName] = React.useState('');
+  const [editNoteText, setEditNoteText] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const modalRef = React.useRef<HTMLDialogElement>(null);
 
   const fetchNotes = React.useCallback(async () => {
     try {
@@ -115,6 +121,99 @@ export default function Newtab() {
     }
   }, []);
 
+  const openNoteModal = React.useCallback((note: Note) => {
+    setSelectedNote(note);
+    setEditName(note.name);
+    setEditNoteText(note.note || '');
+    modalRef.current?.showModal();
+  }, []);
+
+  const closeNoteModal = React.useCallback(() => {
+    modalRef.current?.close();
+    setSelectedNote(null);
+    setEditName('');
+    setEditNoteText('');
+  }, []);
+
+  const saveNote = React.useCallback(async () => {
+    if (!selectedNote) return;
+
+    setSaving(true);
+    try {
+      const db = await getDb();
+      await db.update(notesTable)
+        .set({
+          name: editName,
+          note: editNoteText || null,
+        })
+        .where(eq(notesTable.id, selectedNote.id));
+
+      // Update local state
+      setNotes(prevNotes =>
+        prevNotes.map(n =>
+          n.id === selectedNote.id
+            ? { ...n, name: editName, note: editNoteText || null }
+            : n
+        )
+      );
+
+      closeNoteModal();
+    } catch (error) {
+      console.error('Failed to save note:', error);
+      alert('Failed to save note. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }, [selectedNote, editName, editNoteText, closeNoteModal]);
+
+  const deleteNote = React.useCallback(async () => {
+    if (!selectedNote) return;
+    if (!confirm('Are you sure you want to delete this note? This action cannot be undone.')) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const db = await getDb();
+      await db.delete(notesTable).where(eq(notesTable.id, selectedNote.id));
+
+      // Update local state
+      setNotes(prevNotes => prevNotes.filter(n => n.id !== selectedNote.id));
+      closeNoteModal();
+    } catch (error) {
+      console.error('Failed to delete note:', error);
+      alert('Failed to delete note. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }, [selectedNote, closeNoteModal]);
+
+  const deleteContentItem = React.useCallback(async (contentId: number) => {
+    if (!selectedNote) return;
+    if (!confirm('Are you sure you want to delete this content item?')) {
+      return;
+    }
+
+    try {
+      const db = await getDb();
+      await db.delete(contentsTable).where(eq(contentsTable.id, contentId));
+
+      // Update local state - update both selectedNote and notes
+      const updatedContents = selectedNote.contents.filter(c => c.id !== contentId);
+      setSelectedNote(prev => prev ? { ...prev, contents: updatedContents } : null);
+      setNotes(prevNotes =>
+        prevNotes.map(n =>
+          n.id === selectedNote.id
+            ? { ...n, contents: updatedContents }
+            : n
+        )
+      );
+    } catch (error) {
+      console.error('Failed to delete content item:', error);
+      alert('Failed to delete content item. Please try again.');
+    }
+  }, [selectedNote]);
+
   // Database error state
   if (dbError) {
     return (
@@ -192,7 +291,11 @@ export default function Newtab() {
           ) : (
             <ul className="space-y-3 max-h-[600px] overflow-y-auto">
               {notes.map((note) => (
-                <li key={note.id} className="p-4 bg-base-200 rounded-lg hover:bg-base-300 transition-colors">
+                <li
+                  key={note.id}
+                  className="p-4 bg-base-200 rounded-lg hover:bg-base-300 transition-colors cursor-pointer"
+                  onClick={() => openNoteModal(note)}
+                >
                   <div className="flex items-start gap-3">
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-base-content mb-1">{note.name}</p>
@@ -261,6 +364,158 @@ export default function Newtab() {
           )}
         </div>
       </div>
+
+      {/* Note View/Edit Modal */}
+      <dialog ref={modalRef} className="modal">
+        <div className="modal-box max-w-2xl">
+          {selectedNote && (
+            <>
+              <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Edit Note
+              </h3>
+
+              <div className="space-y-4">
+                {/* Note Name */}
+                <fieldset className="fieldset">
+                  <legend className="fieldset-legend">Name</legend>
+                  <input
+                    type="text"
+                    className="input input-bordered w-full"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="Note name"
+                  />
+                </fieldset>
+
+                {/* Note Text */}
+                <fieldset className="fieldset">
+                  <legend className="fieldset-legend">Note</legend>
+                  <textarea
+                    className="textarea textarea-bordered w-full min-h-[100px]"
+                    value={editNoteText}
+                    onChange={(e) => setEditNoteText(e.target.value)}
+                    placeholder="Add a note..."
+                  />
+                </fieldset>
+
+                {/* Content Items (Read-only) */}
+                {selectedNote.contents.length > 0 && (
+                  <fieldset className="fieldset">
+                    <legend className="fieldset-legend">
+                      Content Items ({selectedNote.contents.length})
+                    </legend>
+                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                      {selectedNote.contents.map((content) => (
+                        <div key={content.id} className="p-3 bg-base-200 rounded-lg group">
+                          <div className="flex items-start gap-2">
+                            {content.favIconUrl && (
+                              <img
+                                src={content.favIconUrl}
+                                alt=""
+                                className="w-4 h-4 mt-0.5 rounded"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-base-content">{content.text}</p>
+                              <div className="flex items-center gap-2 text-xs text-base-content/50 mt-1">
+                                <span>{formatDate(content.createdAt)}</span>
+                                {content.url && (
+                                  <>
+                                    <span>•</span>
+                                    <a
+                                      href={content.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="link link-hover truncate max-w-[250px]"
+                                      title={content.url}
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      {truncateUrl(content.url)}
+                                    </a>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <button
+                              className="btn btn-ghost btn-xs text-error opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={() => deleteContentItem(content.id)}
+                              title="Delete content item"
+                            >
+                              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </fieldset>
+                )}
+
+                {/* Reminder */}
+                {selectedNote.reminder && (
+                  <div className="alert alert-warning">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>Reminder: {formatDate(selectedNote.reminder.remindAt)}</span>
+                  </div>
+                )}
+
+                {/* Created date */}
+                <p className="text-xs text-base-content/50">
+                  Created: {formatDate(selectedNote.createdAt)}
+                </p>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="modal-action">
+                <button
+                  className="btn btn-error btn-outline"
+                  onClick={deleteNote}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <span className="loading loading-spinner loading-xs"></span>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  )}
+                  Delete
+                </button>
+                <div className="flex-1"></div>
+                <button className="btn" onClick={closeNoteModal} disabled={saving}>
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={saveNote}
+                  disabled={saving || !editName.trim()}
+                >
+                  {saving ? (
+                    <span className="loading loading-spinner loading-xs"></span>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                  Save
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button onClick={closeNoteModal}>close</button>
+        </form>
+      </dialog>
     </div>
   );
 }
