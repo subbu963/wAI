@@ -5,6 +5,7 @@ import { eq, sql } from 'drizzle-orm';
 import { generateEmbedding, generateQueryEmbedding } from '../background/embeddings';
 import { summarizeNote, isSummarizerAvailable, getSummarizerAvailability, triggerSummarizerDownload, type SummarizerAvailability } from '../background/summarizer';
 import { getPromptModelAvailability, triggerPromptModelDownload, type PromptModelAvailability } from '../background/promptModel';
+import { createReminderAlarm, clearReminderAlarm } from '../background/alarms';
 
 interface ContentItem {
   id: number;
@@ -56,6 +57,8 @@ export default function Newtab() {
   const [promptModelStatus, setPromptModelStatus] = React.useState<PromptModelAvailability | null>(null);
   const [isDownloadingPromptModel, setIsDownloadingPromptModel] = React.useState(false);
   const [promptModelDownloadProgress, setPromptModelDownloadProgress] = React.useState(0);
+  const [editRemind, setEditRemind] = React.useState(false);
+  const [editRemindAt, setEditRemindAt] = React.useState('');
   const modalRef = React.useRef<HTMLDialogElement>(null);
 
   // Filter notes based on search query (case-insensitive, supports partial match like %query%)
@@ -264,6 +267,15 @@ export default function Newtab() {
     setSelectedNote(note);
     setEditName(note.name);
     setEditNoteText(note.note || '');
+    setEditRemind(!!note.reminder);
+    // Format date for datetime-local input
+    if (note.reminder) {
+      const date = new Date(note.reminder.remindAt);
+      const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+      setEditRemindAt(localDate.toISOString().slice(0, 16));
+    } else {
+      setEditRemindAt('');
+    }
     modalRef.current?.showModal();
   }, []);
 
@@ -272,6 +284,8 @@ export default function Newtab() {
     setSelectedNote(null);
     setEditName('');
     setEditNoteText('');
+    setEditRemind(false);
+    setEditRemindAt('');
     setSummary(null);
     setSummaryProgress('');
   }, []);
@@ -295,11 +309,47 @@ export default function Newtab() {
         })
         .where(eq(notesTable.id, selectedNote.id));
 
+      // Handle reminder changes
+      let updatedReminder: Reminder | null = selectedNote.reminder;
+      
+      if (editRemind && editRemindAt) {
+        const remindAtDate = new Date(editRemindAt);
+        
+        if (selectedNote.reminder) {
+          // Update existing reminder
+          await db.update(remindersTable)
+            .set({ remindAt: remindAtDate })
+            .where(eq(remindersTable.id, selectedNote.reminder.id));
+          
+          // Update alarm
+          await clearReminderAlarm(selectedNote.reminder.id);
+          await createReminderAlarm(selectedNote.reminder.id, remindAtDate);
+          
+          updatedReminder = { ...selectedNote.reminder, remindAt: remindAtDate };
+        } else {
+          // Create new reminder
+          const [newReminder] = await db.insert(remindersTable).values({
+            noteId: selectedNote.id,
+            remindAt: remindAtDate,
+          }).returning();
+          
+          // Create alarm
+          await createReminderAlarm(newReminder.id, remindAtDate);
+          
+          updatedReminder = newReminder;
+        }
+      } else if (!editRemind && selectedNote.reminder) {
+        // Remove reminder and alarm
+        await clearReminderAlarm(selectedNote.reminder.id);
+        await db.delete(remindersTable).where(eq(remindersTable.id, selectedNote.reminder.id));
+        updatedReminder = null;
+      }
+
       // Update local state
       setNotes(prevNotes =>
         prevNotes.map(n =>
           n.id === selectedNote.id
-            ? { ...n, name: editName, note: editNoteText || null }
+            ? { ...n, name: editName, note: editNoteText || null, reminder: updatedReminder }
             : n
         )
       );
@@ -311,7 +361,7 @@ export default function Newtab() {
     } finally {
       setSaving(false);
     }
-  }, [selectedNote, editName, editNoteText, closeNoteModal]);
+  }, [selectedNote, editName, editNoteText, editRemind, editRemindAt, closeNoteModal]);
 
   const deleteNote = React.useCallback(async () => {
     if (!selectedNote) return;
@@ -322,6 +372,12 @@ export default function Newtab() {
     setSaving(true);
     try {
       const db = await getDb();
+      
+      // Clear alarm if there's a reminder
+      if (selectedNote.reminder) {
+        await clearReminderAlarm(selectedNote.reminder.id);
+      }
+      
       await db.delete(notesTable).where(eq(notesTable.id, selectedNote.id));
 
       // Update local state
@@ -824,14 +880,44 @@ export default function Newtab() {
                 )}
 
                 {/* Reminder */}
-                {selectedNote.reminder && (
-                  <div className="alert alert-warning">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span>Reminder: {formatDate(selectedNote.reminder.remindAt)}</span>
+                <fieldset className="fieldset">
+                  <legend className="fieldset-legend">Reminder</legend>
+                  <div className="space-y-3">
+                    <label className="label cursor-pointer justify-start gap-3">
+                      <input
+                        type="checkbox"
+                        className="checkbox checkbox-primary"
+                        checked={editRemind}
+                        onChange={(e) => {
+                          setEditRemind(e.target.checked);
+                          if (!e.target.checked) {
+                            setEditRemindAt('');
+                          }
+                        }}
+                      />
+                      <span className="label-text">Set a reminder</span>
+                    </label>
+                    
+                    {editRemind && (
+                      <input
+                        type="datetime-local"
+                        className="input input-bordered w-full"
+                        value={editRemindAt}
+                        onChange={(e) => setEditRemindAt(e.target.value)}
+                        min={new Date().toISOString().slice(0, 16)}
+                      />
+                    )}
+                    
+                    {selectedNote.reminder?.reminded && (
+                      <div className="alert alert-success py-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-4 w-4" fill="none" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                        <span className="text-sm">Reminded at: {formatDate(selectedNote.reminder.reminded)}</span>
+                      </div>
+                    )}
                   </div>
-                )}
+                </fieldset>
 
                 {/* Summarize Section */}
                 <div className="divider"></div>

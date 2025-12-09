@@ -19,7 +19,9 @@
   },
   "permissions": [
     "activeTab",
+    "alarms",
     "contextMenus",
+    "notifications",
     "scripting",
     "sidePanel",
     "storage"

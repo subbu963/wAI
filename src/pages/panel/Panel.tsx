@@ -3,6 +3,7 @@ import '@pages/panel/Panel.css';
 import { getDb, notesTable, contentsTable, remindersTable } from '../background/db';
 import { eq } from 'drizzle-orm';
 import { generateEmbedding } from '../background/embeddings';
+import { createReminderAlarm, clearReminderAlarm } from '../background/alarms';
 
 type ContentItem = {
   id: number;
@@ -113,10 +114,13 @@ export default function Panel() {
 
         // Add reminder if set
         if (remind && remindAt) {
-          await db.insert(remindersTable).values({
+          const [newReminder] = await db.insert(remindersTable).values({
             noteId: newNote.id,
             remindAt: new Date(remindAt),
-          });
+          }).returning();
+          
+          // Create alarm for the reminder
+          await createReminderAlarm(newReminder.id, new Date(remindAt));
         }
       } else if (selectedNoteId) {
         // Generate embedding for the content
@@ -138,14 +142,22 @@ export default function Panel() {
             await db.update(remindersTable)
               .set({ remindAt: new Date(remindAt) })
               .where(eq(remindersTable.noteId, selectedNoteId));
+            
+            // Update alarm for the reminder
+            await clearReminderAlarm(existingNote.reminder.id);
+            await createReminderAlarm(existingNote.reminder.id, new Date(remindAt));
           } else {
-            await db.insert(remindersTable).values({
+            const [newReminder] = await db.insert(remindersTable).values({
               noteId: selectedNoteId,
               remindAt: new Date(remindAt),
-            });
+            }).returning();
+            
+            // Create alarm for the reminder
+            await createReminderAlarm(newReminder.id, new Date(remindAt));
           }
         } else if (!remind && existingNote?.reminder) {
-          // Remove reminder if unchecked
+          // Remove reminder and its alarm if unchecked
+          await clearReminderAlarm(existingNote.reminder.id);
           await db.delete(remindersTable).where(eq(remindersTable.noteId, selectedNoteId));
         }
       }
