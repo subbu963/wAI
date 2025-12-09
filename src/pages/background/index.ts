@@ -1,5 +1,4 @@
 import './context-menu';
-import './search';
 import { initEmbeddingMessageHandler } from './embeddings';
 import { initAlarmListeners, checkPastDueReminders } from './alarms';
 
