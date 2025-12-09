@@ -4,7 +4,7 @@ export const notesTable = pgTable("notes", {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),
   name: varchar().notNull(),
   note: varchar(),
-  embedding: vector({ dimensions: 1536 }),
+  embedding: vector({ dimensions: 1024 }).notNull(),
   createdAt: timestamp().notNull().defaultNow(),
 }, (table) => [
   index("notes_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),
@@ -16,7 +16,7 @@ export const contentsTable = pgTable("contents", {
   text: varchar().notNull(),
   url: varchar().notNull(),
   favIconUrl: varchar(),
-  embedding: vector({ dimensions: 1536 }),
+  embedding: vector({ dimensions: 1024 }).notNull(),
   createdAt: timestamp().notNull().defaultNow(),
 }, (table) => [
   index("contents_embedding_idx").using("hnsw", table.embedding.op("vector_cosine_ops")),

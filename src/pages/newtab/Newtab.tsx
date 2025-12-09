@@ -1,7 +1,8 @@
 import React from 'react';
 import '@pages/newtab/Newtab.css';
 import { getDb, notesTable, contentsTable, remindersTable } from '../background/db';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
+import { generateEmbedding, generateQueryEmbedding } from '../background/embeddings';
 
 interface ContentItem {
   id: number;
@@ -27,6 +28,7 @@ interface Note {
   createdAt: Date;
   contents: ContentItem[];
   reminder: Reminder | null;
+  similarity?: number; // For semantic search results
 }
 
 export default function Newtab() {
@@ -38,7 +40,23 @@ export default function Newtab() {
   const [editName, setEditName] = React.useState('');
   const [editNoteText, setEditNoteText] = React.useState('');
   const [saving, setSaving] = React.useState(false);
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [isSemanticSearch, setIsSemanticSearch] = React.useState(false);
+  const [semanticSearchResults, setSemanticSearchResults] = React.useState<Note[] | null>(null);
+  const [isSearching, setIsSearching] = React.useState(false);
   const modalRef = React.useRef<HTMLDialogElement>(null);
+
+  // Filter notes based on search query (case-insensitive, supports partial match like %query%)
+  const filteredNotes = React.useMemo(() => {
+    // If semantic search is active and we have results, use those
+    if (isSemanticSearch && semanticSearchResults !== null) {
+      return semanticSearchResults;
+    }
+    // Otherwise use text-based filtering
+    if (!searchQuery.trim()) return notes;
+    const query = searchQuery.toLowerCase();
+    return notes.filter(note => note.name.toLowerCase().includes(query));
+  }, [notes, searchQuery, isSemanticSearch, semanticSearchResults]);
 
   const fetchNotes = React.useCallback(async () => {
     try {
@@ -66,6 +84,96 @@ export default function Newtab() {
   React.useEffect(() => {
     fetchNotes();
   }, [fetchNotes]);
+
+  // Perform semantic search using vector similarity
+  const performSemanticSearch = React.useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setSemanticSearchResults(null);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const queryEmbedding = await generateQueryEmbedding(query);
+      const embeddingStr = `[${queryEmbedding.join(',')}]`;
+      
+      const db = await getDb();
+      
+      // Search in notes by embedding similarity
+      const noteResults = await db.execute(sql`
+        SELECT id, name, note, "createdAt", 
+               1 - (embedding <=> ${embeddingStr}::vector) as similarity
+        FROM notes
+        ORDER BY embedding <=> ${embeddingStr}::vector
+        LIMIT 20
+      `);
+      
+      // Search in contents by embedding similarity
+      const contentResults = await db.execute(sql`
+        SELECT c.id, c."noteId", c.text, c.url, c."favIconUrl", c."createdAt",
+               1 - (c.embedding <=> ${embeddingStr}::vector) as similarity
+        FROM contents c
+        ORDER BY c.embedding <=> ${embeddingStr}::vector
+        LIMIT 50
+      `);
+
+      // Get all reminders
+      const reminders = await db.select().from(remindersTable);
+
+      // Combine results - get unique note IDs from both searches
+      const noteIds = new Set<number>();
+      const noteSimilarities = new Map<number, number>();
+      
+      // Add notes from direct note search
+      for (const row of noteResults.rows as Array<{ id: number; name: string; note: string | null; createdAt: Date; similarity: number }>) {
+        noteIds.add(row.id);
+        noteSimilarities.set(row.id, row.similarity);
+      }
+      
+      // Add notes from content search (use max similarity)
+      for (const row of contentResults.rows as Array<{ noteId: number; similarity: number }>) {
+        noteIds.add(row.noteId);
+        const existing = noteSimilarities.get(row.noteId) || 0;
+        noteSimilarities.set(row.noteId, Math.max(existing, row.similarity));
+      }
+
+      // Fetch full note data for matching notes
+      const matchingNotes: Note[] = [];
+      for (const noteId of noteIds) {
+        const note = notes.find(n => n.id === noteId);
+        if (note) {
+          matchingNotes.push({
+            ...note,
+            similarity: noteSimilarities.get(noteId) || 0,
+          });
+        }
+      }
+
+      // Sort by similarity (highest first)
+      matchingNotes.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+      
+      setSemanticSearchResults(matchingNotes);
+    } catch (error) {
+      console.error('Semantic search failed:', error);
+      setSemanticSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [notes]);
+
+  // Debounced semantic search
+  React.useEffect(() => {
+    if (!isSemanticSearch) {
+      setSemanticSearchResults(null);
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      performSemanticSearch(searchQuery);
+    }, 500); // Debounce 500ms
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery, isSemanticSearch, performSemanticSearch]);
 
   const clearStorage = React.useCallback(async () => {
     if (!confirm('Are you sure you want to clear all notes? This action cannot be undone.')) {
@@ -141,10 +249,16 @@ export default function Newtab() {
     setSaving(true);
     try {
       const db = await getDb();
+
+      // Regenerate embedding if name or note text changed
+      const noteText = `${editName} ${editNoteText || ''}`;
+      const embedding = await generateEmbedding(noteText);
+
       await db.update(notesTable)
         .set({
           name: editName,
           note: editNoteText || null,
+          embedding: embedding,
         })
         .where(eq(notesTable.id, selectedNote.id));
 
@@ -281,16 +395,68 @@ export default function Newtab() {
           </h2>
           <div className="divider mt-0"></div>
 
-          {notes.length === 0 ? (
+          {/* Search Box */}
+          <div className="mb-4 space-y-2">
+            <label className="input input-bordered flex items-center gap-2">
+              {isSearching ? (
+                <span className="loading loading-spinner loading-xs"></span>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              )}
+              <input
+                type="text"
+                className="grow"
+                placeholder={isSemanticSearch ? "Semantic search in notes and content..." : "Search notes by name..."}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+              {searchQuery && (
+                <button
+                  className="btn btn-ghost btn-xs btn-circle"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setSemanticSearchResults(null);
+                  }}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </label>
+            <div className="flex items-center gap-2">
+              <label className="label cursor-pointer gap-2">
+                <span className="label-text text-sm">Semantic Search (AI)</span>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-primary toggle-sm"
+                  checked={isSemanticSearch}
+                  onChange={(e) => {
+                    setIsSemanticSearch(e.target.checked);
+                    if (!e.target.checked) {
+                      setSemanticSearchResults(null);
+                    }
+                  }}
+                />
+              </label>
+              {isSemanticSearch && (
+                <span className="badge badge-primary badge-sm">Uses AI embeddings</span>
+              )}
+            </div>
+          </div>
+
+          {filteredNotes.length === 0 ? (
             <div className="text-center py-8 text-base-content/60">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
-              <p>No notes yet</p>
+              <p>{searchQuery ? (isSemanticSearch ? 'No similar notes found' : 'No notes match your search') : 'No notes yet'}</p>
             </div>
           ) : (
             <ul className="space-y-3 max-h-[600px] overflow-y-auto">
-              {notes.map((note) => (
+              {filteredNotes.map((note) => (
                 <li
                   key={note.id}
                   className="p-4 bg-base-200 rounded-lg hover:bg-base-300 transition-colors cursor-pointer"
@@ -298,7 +464,14 @@ export default function Newtab() {
                 >
                   <div className="flex items-start gap-3">
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-base-content mb-1">{note.name}</p>
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="font-medium text-base-content">{note.name}</p>
+                        {note.similarity !== undefined && (
+                          <span className="badge badge-sm badge-primary">
+                            {Math.round(note.similarity * 100)}% match
+                          </span>
+                        )}
+                      </div>
                       {note.note && (
                         <p className="text-sm text-base-content/70 mb-2">{note.note}</p>
                       )}

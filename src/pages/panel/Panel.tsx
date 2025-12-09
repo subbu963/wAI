@@ -2,6 +2,7 @@ import React from 'react';
 import '@pages/panel/Panel.css';
 import { getDb, notesTable, contentsTable, remindersTable } from '../background/db';
 import { eq } from 'drizzle-orm';
+import { generateEmbedding } from '../background/embeddings';
 
 type ContentItem = {
   id: number;
@@ -87,11 +88,19 @@ export default function Panel() {
       const db = await getDb();
 
       if (isNewNote) {
+        // Generate embedding for the note
+        const noteText = `${name} ${note || ''}`;
+        const noteEmbedding = await generateEmbedding(noteText);
+
         // Create new note
         const [newNote] = await db.insert(notesTable).values({
           name: name,
           note: note || null,
+          embedding: noteEmbedding,
         }).returning();
+
+        // Generate embedding for the content
+        const contentEmbedding = await generateEmbedding(sidePanelData.data.content);
 
         // Add content
         await db.insert(contentsTable).values({
@@ -99,6 +108,7 @@ export default function Panel() {
           text: sidePanelData.data.content,
           url: sidePanelData.data.url,
           favIconUrl: sidePanelData.data.favIconUrl,
+          embedding: contentEmbedding,
         });
 
         // Add reminder if set
@@ -109,12 +119,16 @@ export default function Panel() {
           });
         }
       } else if (selectedNoteId) {
+        // Generate embedding for the content
+        const contentEmbedding = await generateEmbedding(sidePanelData.data.content);
+
         // Append content to existing note
         await db.insert(contentsTable).values({
           noteId: selectedNoteId,
           text: sidePanelData.data.content,
           url: sidePanelData.data.url,
           favIconUrl: sidePanelData.data.favIconUrl,
+          embedding: contentEmbedding,
         });
 
         // Update or create reminder

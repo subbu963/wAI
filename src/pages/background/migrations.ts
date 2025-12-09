@@ -4,7 +4,7 @@
 import type { MigrationMeta } from "drizzle-orm/migrator";
 
 // Import migration SQL files as raw strings
-import migration0000 from "../../../drizzle/0000_material_charles_xavier.sql?raw";
+import migration0000 from "../../../drizzle/0000_happy_mad_thinker.sql?raw";
 import journal from "../../../drizzle/meta/_journal.json";
 
 export const migrations: MigrationMeta[] = journal.entries.map((entry) => {
@@ -19,7 +19,7 @@ export const migrations: MigrationMeta[] = journal.entries.map((entry) => {
 
 function getMigrationSql(tag: string): string {
   switch (tag) {
-    case "0000_material_charles_xavier":
+    case "0000_happy_mad_thinker":
       return migration0000;
     default:
       throw new Error(`Unknown migration: ${tag}`);
