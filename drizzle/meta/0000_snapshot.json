@@ -1,9 +1,107 @@
 {
-  "id": "34e5c40e-7bdd-4f68-b86e-4ff343d34926",
+  "id": "24381b9a-6722-456e-af47-a4de06d99d32",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.contents": {
+      "name": "contents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "contents_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "noteId": {
+          "name": "noteId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "url": {
+          "name": "url",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "favIconUrl": {
+          "name": "favIconUrl",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "vector(1536)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "contents_embedding_idx": {
+          "name": "contents_embedding_idx",
+          "columns": [
+            {
+              "expression": "embedding",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "vector_cosine_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "hnsw",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "contents_noteId_notes_id_fk": {
+          "name": "contents_noteId_notes_id_fk",
+          "tableFrom": "contents",
+          "tableTo": "notes",
+          "columnsFrom": [
+            "noteId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.notes": {
       "name": "notes",
       "schema": "",
@@ -25,15 +123,21 @@
             "cycle": false
           }
         },
-        "content": {
-          "name": "content",
+        "name": {
+          "name": "name",
           "type": "varchar",
           "primaryKey": false,
           "notNull": true
         },
-        "additionalInfo": {
-          "name": "additionalInfo",
+        "note": {
+          "name": "note",
           "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "vector(1536)",
           "primaryKey": false,
           "notNull": false
         },
@@ -43,21 +147,26 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "url": {
-          "name": "url",
-          "type": "varchar",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "favIconUrl": {
-          "name": "favIconUrl",
-          "type": "varchar",
-          "primaryKey": false,
-          "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "notes_embedding_idx": {
+          "name": "notes_embedding_idx",
+          "columns": [
+            {
+              "expression": "embedding",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "vector_cosine_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "hnsw",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -86,17 +195,23 @@
             "cycle": false
           }
         },
-        "rawText": {
-          "name": "rawText",
-          "type": "varchar",
+        "noteId": {
+          "name": "noteId",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "email": {
-          "name": "email",
-          "type": "varchar",
+        "remindAt": {
+          "name": "remindAt",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": true
+        },
+        "reminded": {
+          "name": "reminded",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
         },
         "createdAt": {
           "name": "createdAt",
@@ -104,26 +219,26 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "scheduledAt": {
-          "name": "scheduledAt",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": true
         }
       },
       "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "reminders_email_unique": {
-          "name": "reminders_email_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+      "foreignKeys": {
+        "reminders_noteId_notes_id_fk": {
+          "name": "reminders_noteId_notes_id_fk",
+          "tableFrom": "reminders",
+          "tableTo": "notes",
+          "columnsFrom": [
+            "noteId"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

@@ -1,6 +1,3 @@
-import { db, notesTable } from './db';
-
-
 const MAIN_MENU_ID = "wai_main_menu";
 const NOTE_DOWN_ITEM_ID = `${MAIN_MENU_ID}_note_down_item`;
 
@@ -14,12 +11,6 @@ chrome.contextMenus.removeAll(() => {
     parentId: MAIN_MENU_ID,
     id: NOTE_DOWN_ITEM_ID, // Unique ID for your item
     title: "Note down", // Text shown in the menu
-    contexts: ["selection", "link", "page"] // Where it appears (text, link, page)
-  });
-  chrome.contextMenus.create({
-    parentId: MAIN_MENU_ID,
-    id: "wai_main_menu_openSidePanel",
-    title: "Open Side Panel",
     contexts: ["all"] // Or specify contexts like "page", "selection", "link" etc.
   });
 });
@@ -27,22 +18,6 @@ chrome.contextMenus.removeAll(() => {
 // Listen for clicks on the menu item
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === NOTE_DOWN_ITEM_ID) {
-    console.log("Menu item clicked!");
-    console.log("Clicked text:", info.selectionText, tab); // If context was 'selection'
-    console.log("Clicked link:", info.linkUrl); // If context was 'link'
-    await db.insert(notesTable).values({
-      content: info.selectionText || '',
-      url: tab?.url || '',
-      favIconUrl: tab?.favIconUrl || '',
-    });
-    // Add your extension's logic here, e.g., show an alert, fetch data
-    // chrome.scripting.executeScript({
-    //     target: { tabId: tab.id },
-    //     func: () => { alert("Hello from context menu!"); }
-    // });
-    // PubSub.publish('NOTE_DOWN', info.selectionText || '');
-  }
-  if (info.menuItemId === "wai_main_menu_openSidePanel") {
       // Open a global side panel on the current window
       // chrome.sidePanel.open({ windowId: tab.windowId });
 
@@ -58,6 +33,5 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       }}, () => {
         chrome.sidePanel.open({ tabId: tab?.id })
       });
-      // chrome.sidePanel.open({ tabId: tab?.id });
     }
 });
