@@ -3,6 +3,7 @@ import '@pages/newtab/Newtab.css';
 import { getDb, notesTable, contentsTable, remindersTable } from '../background/db';
 import { eq, sql } from 'drizzle-orm';
 import { generateEmbedding, generateQueryEmbedding } from '../background/embeddings';
+import { summarizeNote, isSummarizerAvailable } from '../background/summarizer';
 
 interface ContentItem {
   id: number;
@@ -44,6 +45,10 @@ export default function Newtab() {
   const [isSemanticSearch, setIsSemanticSearch] = React.useState(false);
   const [semanticSearchResults, setSemanticSearchResults] = React.useState<Note[] | null>(null);
   const [isSearching, setIsSearching] = React.useState(false);
+  const [isSummarizing, setIsSummarizing] = React.useState(false);
+  const [summaryProgress, setSummaryProgress] = React.useState('');
+  const [summary, setSummary] = React.useState<string | null>(null);
+  const [summarizerAvailable, setSummarizerAvailable] = React.useState<boolean | null>(null);
   const modalRef = React.useRef<HTMLDialogElement>(null);
 
   // Filter notes based on search query (case-insensitive, supports partial match like %query%)
@@ -84,6 +89,11 @@ export default function Newtab() {
   React.useEffect(() => {
     fetchNotes();
   }, [fetchNotes]);
+
+  // Check summarizer availability on mount
+  React.useEffect(() => {
+    isSummarizerAvailable().then(setSummarizerAvailable);
+  }, []);
 
   // Perform semantic search using vector similarity
   const performSemanticSearch = React.useCallback(async (query: string) => {
@@ -241,6 +251,8 @@ export default function Newtab() {
     setSelectedNote(null);
     setEditName('');
     setEditNoteText('');
+    setSummary(null);
+    setSummaryProgress('');
   }, []);
 
   const saveNote = React.useCallback(async () => {
@@ -325,6 +337,38 @@ export default function Newtab() {
     } catch (error) {
       console.error('Failed to delete content item:', error);
       alert('Failed to delete content item. Please try again.');
+    }
+  }, [selectedNote]);
+
+  const handleSummarize = React.useCallback(async () => {
+    if (!selectedNote) return;
+
+    setIsSummarizing(true);
+    setSummary(null);
+    setSummaryProgress('Initializing...');
+
+    try {
+      const result = await summarizeNote(
+        {
+          name: selectedNote.name,
+          note: selectedNote.note,
+          contents: selectedNote.contents.map(c => ({ text: c.text, url: c.url })),
+        },
+        {
+          type: 'key-points',
+          length: 'medium',
+          format: 'markdown',
+          onProgress: setSummaryProgress,
+        }
+      );
+      setSummary(result);
+      setSummaryProgress('');
+    } catch (error) {
+      console.error('Failed to summarize note:', error);
+      setSummaryProgress('');
+      alert(`Failed to summarize: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsSummarizing(false);
     }
   }, [selectedNote]);
 
@@ -640,6 +684,51 @@ export default function Newtab() {
                     <span>Reminder: {formatDate(selectedNote.reminder.remindAt)}</span>
                   </div>
                 )}
+
+                {/* Summarize Section */}
+                <div className="divider"></div>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="btn btn-secondary btn-sm gap-2"
+                      onClick={handleSummarize}
+                      disabled={isSummarizing || summarizerAvailable === false}
+                      title={summarizerAvailable === false ? 'Chrome Summarizer API not available' : 'Generate AI summary'}
+                    >
+                      {isSummarizing ? (
+                        <span className="loading loading-spinner loading-xs"></span>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                      )}
+                      Summarize
+                    </button>
+                    {summarizerAvailable === false && (
+                      <span className="text-xs text-warning">
+                        Requires Chrome 138+ with Gemini Nano
+                      </span>
+                    )}
+                    {isSummarizing && summaryProgress && (
+                      <span className="text-xs text-base-content/70">{summaryProgress}</span>
+                    )}
+                  </div>
+
+                  {/* Summary Display */}
+                  {summary && (
+                    <div className="bg-base-200 rounded-lg p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-secondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        <span className="font-medium text-sm">AI Summary</span>
+                      </div>
+                      <div className="prose prose-sm max-w-none text-base-content/80 whitespace-pre-wrap">
+                        {summary}
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {/* Created date */}
                 <p className="text-xs text-base-content/50">
