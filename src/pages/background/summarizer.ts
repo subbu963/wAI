@@ -8,22 +8,75 @@ const CHUNK_SIZE = 3000;
 // Overlap between chunks for context preservation
 const CHUNK_OVERLAP = 200;
 
+// Availability status types
+export type SummarizerAvailability = 'unavailable' | 'downloadable' | 'downloading' | 'available';
+
 /**
- * Check if the Summarizer API is available
+ * Get the detailed availability status of the Summarizer API
  */
-export async function isSummarizerAvailable(): Promise<boolean> {
+export async function getSummarizerAvailability(): Promise<SummarizerAvailability> {
   if (!('Summarizer' in self)) {
     console.log('Summarizer API not available in this browser');
-    return false;
+    return 'unavailable';
   }
   
   try {
     const availability = await (self as any).Summarizer.availability();
     console.log('Summarizer availability:', availability);
-    return availability !== 'unavailable';
+    return availability as SummarizerAvailability;
   } catch (error) {
     console.error('Error checking summarizer availability:', error);
-    return false;
+    return 'unavailable';
+  }
+}
+
+/**
+ * Check if the Summarizer API is available
+ */
+export async function isSummarizerAvailable(): Promise<boolean> {
+  const availability = await getSummarizerAvailability();
+  return availability !== 'unavailable';
+}
+
+/**
+ * Trigger the summarizer model download
+ * Returns a promise that resolves when download is complete
+ */
+export async function triggerSummarizerDownload(
+  onProgress?: (progress: number) => void
+): Promise<boolean> {
+  if (!('Summarizer' in self)) {
+    throw new Error('Summarizer API not available in this browser');
+  }
+
+  try {
+    const availability = await getSummarizerAvailability();
+    if (availability === 'unavailable') {
+      throw new Error('Summarizer is not available on this device');
+    }
+    if (availability === 'available') {
+      console.log('Summarizer model already available');
+      return true;
+    }
+
+    console.log('Triggering summarizer model download...');
+    
+    // Create a summarizer to trigger the download
+    await (self as any).Summarizer.create({
+      monitor(m: any) {
+        m.addEventListener('downloadprogress', (e: any) => {
+          const progress = e.loaded * 100;
+          console.log(`Summarizer model download: ${progress.toFixed(1)}%`);
+          onProgress?.(progress);
+        });
+      }
+    });
+
+    console.log('Summarizer model download complete');
+    return true;
+  } catch (error) {
+    console.error('Failed to download summarizer model:', error);
+    throw error;
   }
 }
 

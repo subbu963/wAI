@@ -3,7 +3,8 @@ import '@pages/newtab/Newtab.css';
 import { getDb, notesTable, contentsTable, remindersTable } from '../background/db';
 import { eq, sql } from 'drizzle-orm';
 import { generateEmbedding, generateQueryEmbedding } from '../background/embeddings';
-import { summarizeNote, isSummarizerAvailable } from '../background/summarizer';
+import { summarizeNote, isSummarizerAvailable, getSummarizerAvailability, triggerSummarizerDownload, type SummarizerAvailability } from '../background/summarizer';
+import { getPromptModelAvailability, triggerPromptModelDownload, type PromptModelAvailability } from '../background/promptModel';
 
 interface ContentItem {
   id: number;
@@ -49,6 +50,12 @@ export default function Newtab() {
   const [summaryProgress, setSummaryProgress] = React.useState('');
   const [summary, setSummary] = React.useState<string | null>(null);
   const [summarizerAvailable, setSummarizerAvailable] = React.useState<boolean | null>(null);
+  const [summarizerStatus, setSummarizerStatus] = React.useState<SummarizerAvailability | null>(null);
+  const [isDownloadingModel, setIsDownloadingModel] = React.useState(false);
+  const [downloadProgress, setDownloadProgress] = React.useState(0);
+  const [promptModelStatus, setPromptModelStatus] = React.useState<PromptModelAvailability | null>(null);
+  const [isDownloadingPromptModel, setIsDownloadingPromptModel] = React.useState(false);
+  const [promptModelDownloadProgress, setPromptModelDownloadProgress] = React.useState(0);
   const modalRef = React.useRef<HTMLDialogElement>(null);
 
   // Filter notes based on search query (case-insensitive, supports partial match like %query%)
@@ -92,7 +99,21 @@ export default function Newtab() {
 
   // Check summarizer availability on mount
   React.useEffect(() => {
-    isSummarizerAvailable().then(setSummarizerAvailable);
+    const checkAvailability = async () => {
+      const status = await getSummarizerAvailability();
+      setSummarizerStatus(status);
+      setSummarizerAvailable(status !== 'unavailable');
+    };
+    checkAvailability();
+  }, []);
+
+  // Check prompt model availability on mount
+  React.useEffect(() => {
+    const checkPromptModelAvailability = async () => {
+      const status = await getPromptModelAvailability();
+      setPromptModelStatus(status);
+    };
+    checkPromptModelAvailability();
   }, []);
 
   // Perform semantic search using vector similarity
@@ -372,6 +393,45 @@ export default function Newtab() {
     }
   }, [selectedNote]);
 
+  const handleDownloadModel = React.useCallback(async () => {
+    setIsDownloadingModel(true);
+    setDownloadProgress(0);
+
+    try {
+      await triggerSummarizerDownload((progress) => {
+        setDownloadProgress(progress);
+      });
+      // Refresh status after download
+      const status = await getSummarizerAvailability();
+      setSummarizerStatus(status);
+      setSummarizerAvailable(status !== 'unavailable');
+    } catch (error) {
+      console.error('Failed to download summarizer model:', error);
+      alert(`Failed to download model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsDownloadingModel(false);
+    }
+  }, []);
+
+  const handleDownloadPromptModel = React.useCallback(async () => {
+    setIsDownloadingPromptModel(true);
+    setPromptModelDownloadProgress(0);
+
+    try {
+      await triggerPromptModelDownload((progress) => {
+        setPromptModelDownloadProgress(progress);
+      });
+      // Refresh status after download
+      const status = await getPromptModelAvailability();
+      setPromptModelStatus(status);
+    } catch (error) {
+      console.error('Failed to download prompt model:', error);
+      alert(`Failed to download model: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsDownloadingPromptModel(false);
+    }
+  }, []);
+
   // Database error state
   if (dbError) {
     return (
@@ -410,6 +470,94 @@ export default function Newtab() {
 
   return (
     <div className="min-h-screen bg-base-200 p-6">
+      {/* Summarizer Status Bar */}
+      <div className="max-w-4xl mx-auto mb-4">
+        <div className={`alert ${
+          summarizerStatus === 'available' ? 'alert-success' :
+          summarizerStatus === 'downloading' || isDownloadingModel ? 'alert-info' :
+          summarizerStatus === 'downloadable' ? 'alert-warning' :
+          'alert-error'
+        } shadow-lg`}>
+          <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          <div className="flex-1">
+            <span className="font-medium">AI Summarizer: </span>
+            {summarizerStatus === null && <span>Checking...</span>}
+            {summarizerStatus === 'available' && <span>Ready</span>}
+            {summarizerStatus === 'downloading' && <span>Model downloading...</span>}
+            {summarizerStatus === 'downloadable' && !isDownloadingModel && <span>Model needs to be downloaded</span>}
+            {summarizerStatus === 'unavailable' && <span>Not available (requires Chrome 138+ with Gemini Nano)</span>}
+            {isDownloadingModel && (
+              <span className="ml-2">
+                Downloading... {downloadProgress.toFixed(0)}%
+              </span>
+            )}
+          </div>
+          {summarizerStatus === 'downloadable' && !isDownloadingModel && (
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={handleDownloadModel}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Download Model
+            </button>
+          )}
+          {isDownloadingModel && (
+            <span className="loading loading-spinner loading-sm"></span>
+          )}
+          {summarizerStatus === 'available' && (
+            <span className="badge badge-success">✓</span>
+          )}
+        </div>
+      </div>
+
+      {/* Prompt Model Status Bar */}
+      <div className="max-w-4xl mx-auto mb-4">
+        <div className={`alert ${
+          promptModelStatus === 'available' ? 'alert-success' :
+          promptModelStatus === 'downloading' || isDownloadingPromptModel ? 'alert-info' :
+          promptModelStatus === 'downloadable' ? 'alert-warning' :
+          'alert-error'
+        } shadow-lg`}>
+          <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-5 w-5" fill="none" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+          </svg>
+          <div className="flex-1">
+            <span className="font-medium">AI Prompt Model: </span>
+            {promptModelStatus === null && <span>Checking...</span>}
+            {promptModelStatus === 'available' && <span>Ready</span>}
+            {promptModelStatus === 'downloading' && <span>Model downloading...</span>}
+            {promptModelStatus === 'downloadable' && !isDownloadingPromptModel && <span>Model needs to be downloaded</span>}
+            {promptModelStatus === 'unavailable' && <span>Not available (requires Chrome 138+ with Gemini Nano)</span>}
+            {isDownloadingPromptModel && (
+              <span className="ml-2">
+                Downloading... {promptModelDownloadProgress.toFixed(0)}%
+              </span>
+            )}
+          </div>
+          {promptModelStatus === 'downloadable' && !isDownloadingPromptModel && (
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={handleDownloadPromptModel}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Download Model
+            </button>
+          )}
+          {isDownloadingPromptModel && (
+            <span className="loading loading-spinner loading-sm"></span>
+          )}
+          {promptModelStatus === 'available' && (
+            <span className="badge badge-success">✓</span>
+          )}
+        </div>
+      </div>
+
       {/* Clear Storage Button */}
       <div className="fixed top-4 right-4 z-50">
         <button
